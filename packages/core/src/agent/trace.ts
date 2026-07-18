@@ -33,6 +33,8 @@ export interface QueryTrace {
 
 /** Collects steps during one agent run. Thread one instance through the tools. */
 export class TraceRecorder {
+  /** Stable id, generated up front so mutations can be tagged before finalize. */
+  readonly id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   readonly steps: TraceStep[] = [];
   private readonly t0 = Date.now();
 
@@ -48,7 +50,7 @@ export class TraceRecorder {
     modelChain: string[] = []
   ): QueryTrace {
     return {
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      id: this.id,
       kind,
       input: truncate(input, 300),
       startedAt: new Date(this.t0).toISOString(),

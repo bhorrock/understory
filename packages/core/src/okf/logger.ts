@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Bundle } from "./bundle.js";
+import { readEvents, type KnowledgeEvent } from "./events.js";
 import type { LogAction, LogEntry } from "./types.js";
 
 const LOG_HEADER = "# Directory Update Log";
@@ -52,14 +53,51 @@ export async function appendLog(
   await fs.writeFile(logPath, content, "utf-8");
 }
 
-/** Parse the root log.md into structured entries (best-effort, permissive). */
+/**
+ * Regenerate log.md as a projection of the event stream — byte-compatible with
+ * the incremental `appendLog` format: `# Directory Update Log`, then newest-first
+ * `## YYYY-MM-DD` sections of `* **Action**: summary` bullets. Events must arrive
+ * newest-first (as `readEvents` returns them).
+ */
+export async function projectLog(bundle: Bundle, events: KnowledgeEvent[]): Promise<void> {
+  const logPath = path.join(bundle.root, "log.md");
+  const blocks: string[] = [LOG_HEADER];
+  let currentDate = "";
+  for (const ev of events) {
+    const date = ev.ts.slice(0, 10);
+    if (date !== currentDate) {
+      blocks.push(`## ${date}`);
+      currentDate = date;
+    }
+    blocks.push(`* **${ev.action}**: ${ev.summary.trim()}`);
+  }
+  await fs.writeFile(logPath, blocks.join("\n\n") + "\n", "utf-8");
+}
+
+/**
+ * Structured log entries newest-first. Prefers the event stream (system of
+ * record); falls back to parsing a legacy log.md when no events exist.
+ */
 export async function readLog(bundle: Bundle): Promise<LogEntry[]> {
+  const events = await readEvents(bundle, { limit: Number.MAX_SAFE_INTEGER });
+  if (events.length > 0) {
+    return events.map((ev) => ({
+      date: ev.ts.slice(0, 10),
+      action: ev.action,
+      summary: ev.summary,
+    }));
+  }
   let raw: string;
   try {
     raw = await fs.readFile(path.join(bundle.root, "log.md"), "utf-8");
   } catch {
     return [];
   }
+  return parseLegacyLog(raw);
+}
+
+/** Parse a legacy log.md into structured entries (best-effort, permissive). */
+export function parseLegacyLog(raw: string): LogEntry[] {
   const entries: LogEntry[] = [];
   let currentDate = "";
   for (const line of raw.split("\n")) {

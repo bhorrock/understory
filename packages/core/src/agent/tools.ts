@@ -81,7 +81,18 @@ export function buildReadTools(kb: KnowledgeBase, trace?: TraceRecorder) {
   };
 }
 
-export function buildWriteTools(kb: KnowledgeBase, filesChanged: Set<string>, trace?: TraceRecorder) {
+/** Provenance threaded onto mutation events (the model chain that produced them). */
+export interface WriteToolMeta {
+  modelChain?: string[];
+}
+
+export function buildWriteTools(
+  kb: KnowledgeBase,
+  filesChanged: Set<string>,
+  trace?: TraceRecorder,
+  meta?: WriteToolMeta
+) {
+  const mutationMeta = { traceId: trace?.id, modelChain: meta?.modelChain };
   return {
     write_concept: tool({
       description:
@@ -93,7 +104,7 @@ export function buildWriteTools(kb: KnowledgeBase, filesChanged: Set<string>, tr
         log_summary: logSummary,
       }),
       execute: async ({ path, frontmatter, body, log_summary }) => {
-        const c = await kb.writeConcept(path, frontmatter, body, log_summary);
+        const c = await kb.writeConcept(path, frontmatter, body, log_summary, mutationMeta);
         filesChanged.add(c.path);
         trace?.record("write_concept", c.path, [c.path], true);
         return { written: c.path };
@@ -133,7 +144,8 @@ export function buildWriteTools(kb: KnowledgeBase, filesChanged: Set<string>, tr
               : undefined,
             replaceBody: replace_body,
           },
-          log_summary
+          log_summary,
+          mutationMeta
         );
         filesChanged.add(c.path);
         trace?.record("patch_concept", c.path, [c.path], true);
@@ -148,7 +160,7 @@ export function buildWriteTools(kb: KnowledgeBase, filesChanged: Set<string>, tr
         log_summary: logSummary,
       }),
       execute: async ({ path, log_summary }) => {
-        await kb.deleteConcept(path, log_summary);
+        await kb.deleteConcept(path, log_summary, mutationMeta);
         filesChanged.add(path);
         trace?.record("delete_concept", path, [path], true);
         return { deleted: path };
