@@ -141,7 +141,10 @@ export async function runMutation(
       model: resolved.model,
       system: buildSystemPrompt(ctx),
       prompt: instruction,
-      tools: { ...buildReadTools(kb, recorder), ...buildWriteTools(kb, filesChanged, recorder) },
+      tools: {
+        ...buildReadTools(kb, recorder),
+        ...buildWriteTools(kb, filesChanged, recorder, { modelChain }),
+      },
       stopWhen: stepCountIs(MAX_STEPS),
       temperature: 0.2,
     });
@@ -198,7 +201,10 @@ export async function streamChat(
       model: resolved.model,
       system: buildSystemPrompt(ctx),
       messages,
-      tools: { ...buildReadTools(kb, recorder), ...buildWriteTools(kb, filesChanged, recorder) },
+      tools: {
+        ...buildReadTools(kb, recorder),
+        ...buildWriteTools(kb, filesChanged, recorder, { modelChain }),
+      },
       stopWhen: stepCountIs(MAX_STEPS),
       onFinish: async ({ text }) => {
         // Persist only turns that actually touched the bundle.
