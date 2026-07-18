@@ -42,7 +42,8 @@ export function buildReadTools(kb: KnowledgeBase, trace?: TraceRecorder) {
         if (hits.length > 0) return hits;
         // Keyword miss ≠ knowledge absent. Put the map in the tool result so
         // the model's next step is to read plausible concepts, not give up.
-        const tree = formatTree(await kb.listTree());
+        // Adaptive so a huge bundle degrades to a directory overview here too.
+        const tree = formatTreeAdaptive(await kb.listTree()).text;
         return {
           hits: [],
           notice:
@@ -66,7 +67,7 @@ export function buildReadTools(kb: KnowledgeBase, trace?: TraceRecorder) {
       inputSchema: z.object({}),
       execute: async () => {
         trace?.record("list_directory", "", []);
-        return formatTree(await kb.listTree());
+        return formatTreeAdaptive(await kb.listTree()).text;
       },
     }),
     lint_knowledge: tool({
@@ -182,6 +183,92 @@ export function formatTree(node: TreeNode, depth = 0): string {
       const meta = [child.type, child.description].filter(Boolean).join(" — ");
       lines.push(`${indent}${child.name}${meta ? `  [${meta}]` : ""}`);
     }
+  }
+  return lines.filter(Boolean).join("\n");
+}
+
+/** Result of {@link formatTreeAdaptive}: the listing plus what altitude it landed at. */
+export interface AdaptiveTree {
+  text: string;
+  /** True when the full listing exceeded budget and a directory overview was used. */
+  degraded: boolean;
+  /** Total concept count in the tree (recursive). */
+  conceptCount: number;
+}
+
+const DEFAULT_TREE_BUDGET = 4000;
+
+function treeBudget(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.UNDERSTORY_TREE_BUDGET);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_TREE_BUDGET;
+}
+
+/**
+ * Budget-bounded tree rendering. Returns the full {@link formatTree} listing when
+ * it fits `budgetChars`; otherwise degrades to one line per directory with
+ * recursive concept counts and types, capping depth to 1 if still over budget.
+ * The first real O(N) cliff was dumping the whole tree into every prompt — this
+ * keeps prompt size bounded as the bundle grows.
+ */
+export function formatTreeAdaptive(tree: TreeNode, budgetChars = treeBudget()): AdaptiveTree {
+  const conceptCount = summarizeNode(tree).count;
+  const full = formatTree(tree);
+  if (full.length <= budgetChars) {
+    return { text: full, degraded: false, conceptCount };
+  }
+  const overview = formatTreeOverview(tree, Number.POSITIVE_INFINITY);
+  if (overview.length <= budgetChars) {
+    return { text: overview, degraded: true, conceptCount };
+  }
+  // Still over: flatten to just the top-level directories (last resort).
+  return { text: formatTreeOverview(tree, 1), degraded: true, conceptCount };
+}
+
+/** Recursive concept count and distinct types under a node. */
+function summarizeNode(node: TreeNode): { count: number; types: Set<string> } {
+  let count = 0;
+  const types = new Set<string>();
+  for (const child of node.children ?? []) {
+    if (child.kind === "directory") {
+      const nested = summarizeNode(child);
+      count += nested.count;
+      nested.types.forEach((t) => types.add(t));
+    } else if (child.kind === "concept") {
+      count++;
+      if (child.type) types.add(child.type);
+    }
+  }
+  return { count, types };
+}
+
+/** Degraded rendering: `dir/ — N concepts (Type A, Type B)` per directory. */
+function formatTreeOverview(node: TreeNode, maxDepth: number, depth = 0): string {
+  const lines: string[] = [];
+  if (depth === 0) lines.push("/");
+  let rootConcepts = 0;
+  const rootTypes = new Set<string>();
+  for (const child of node.children ?? []) {
+    const indent = "  ".repeat(depth + 1);
+    if (child.kind === "directory") {
+      const { count, types } = summarizeNode(child);
+      const typeList = [...types].sort().join(", ");
+      lines.push(
+        `${indent}${child.name}/ — ${count} concept${count === 1 ? "" : "s"}${typeList ? ` (${typeList})` : ""}`
+      );
+      if (depth + 1 < maxDepth) {
+        const sub = formatTreeOverview(child, maxDepth, depth + 1);
+        if (sub) lines.push(sub);
+      }
+    } else if (child.kind === "concept") {
+      rootConcepts++;
+      if (child.type) rootTypes.add(child.type);
+    }
+  }
+  if (depth === 0 && rootConcepts > 0) {
+    const typeList = [...rootTypes].sort().join(", ");
+    lines.push(
+      `  (root) — ${rootConcepts} concept${rootConcepts === 1 ? "" : "s"}${typeList ? ` (${typeList})` : ""}`
+    );
   }
   return lines.filter(Boolean).join("\n");
 }

@@ -1,21 +1,45 @@
 import { generateText, streamText, stepCountIs, type LanguageModel, type ModelMessage } from "ai";
 import type { KnowledgeBase } from "../okf/index.js";
 import {
+  anthropicThinkingOptions,
   createModel,
+  openaiThinkingBody,
   resolveFallbackConfig,
   resolveModelConfig,
+  resolveThinking,
   type ModelConfig,
 } from "../providers/index.js";
 import { withFallback } from "../providers/fallback.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { buildReadTools, buildWriteTools, formatTree } from "./tools.js";
+import { buildReadTools, buildWriteTools, formatTreeAdaptive } from "./tools.js";
 import { TraceRecorder, TraceStore } from "./trace.js";
 
-const MAX_STEPS = 12;
+/** Task modes for model/thinking resolution. "maintain" reuses the mutate prompt. */
+type AgentMode = "query" | "mutate" | "chat" | "maintain";
+
+/** Steps cap per run (LLM_MAX_STEPS, default 12). Injectable env for tests. */
+export function resolveMaxSteps(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.LLM_MAX_STEPS);
+  return Number.isInteger(n) && n > 0 ? n : 12;
+}
+
+/** Mutation sampling temperature (LLM_MUTATION_TEMPERATURE, default 0.2). */
+export function resolveMutationTemperature(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.LLM_MUTATION_TEMPERATURE);
+  return Number.isFinite(n) && n >= 0 ? n : 0.2;
+}
 
 export interface AgentOptions {
   model?: string;
 }
+
+/** Mutation-run options: `kind` selects the mutate vs maintain model/thinking profile. */
+export interface MutationOptions extends AgentOptions {
+  kind?: "mutate" | "maintain";
+}
+
+/** Call-time providerOptions for thinking (anthropic namespace). */
+type ThinkingProviderOptions = ReturnType<typeof anthropicThinkingOptions>;
 
 export interface QueryResult {
   answer: string;
@@ -38,37 +62,56 @@ export type MutationOutcome =
 interface ResolvedAgentModel {
   model: LanguageModel;
   modelChain: string[];
+  /** Passed to generateText/streamText — present only when anthropic thinking is on. */
+  providerOptions?: ThinkingProviderOptions;
 }
 
 async function promptContext(kb: KnowledgeBase, mode: "query" | "mutate" | "chat") {
   const [types, tree] = await Promise.all([kb.listTypes(), kb.listTree()]);
-  return { existingTypes: types, treeSummary: formatTree(tree), mode };
+  const adaptive = formatTreeAdaptive(tree);
+  return { existingTypes: types, treeSummary: adaptive.text, treeDegraded: adaptive.degraded, mode };
+}
+
+/** OpenAI-format thinking is injected into the request body at model creation. */
+function extraBodyFor(config: ModelConfig, thinking: boolean, env: NodeJS.ProcessEnv) {
+  return thinking && config.format === "openai" ? openaiThinkingBody(env) : undefined;
 }
 
 async function resolveAgentModel(
   options: AgentOptions,
-  mode: "query" | "mutate" | "chat",
+  mode: AgentMode,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<ResolvedAgentModel> {
+  const thinking = resolveThinking(env, mode);
   const primaryConfig = withModelOverride(resolveModelConfig(env), options.model);
-  const primary = await createModel(primaryConfig);
+  const primary = await createModel(primaryConfig, { extraBody: extraBodyFor(primaryConfig, thinking, env) });
   const fallbackConfig = resolveFallbackConfig(env);
 
+  // Anthropic thinking rides call-time providerOptions (namespaced, so an openai
+  // model in the chain simply ignores it).
+  const anthropicInChain =
+    thinking &&
+    (primaryConfig.format === "anthropic" || fallbackConfig?.format === "anthropic");
+  const providerOptions = anthropicInChain ? anthropicThinkingOptions(env) : undefined;
+
   if (!fallbackConfig) {
-    return { model: primary, modelChain: [modelLabel(primaryConfig)] };
+    return { model: primary, modelChain: [modelLabel(primaryConfig)], providerOptions };
   }
 
   const allowFor = resolveAllowFor(env.LLM_FALLBACK_ALLOW_FOR);
   if (allowFor && !allowFor.has(mode)) {
-    return { model: primary, modelChain: [modelLabel(primaryConfig)] };
+    return { model: primary, modelChain: [modelLabel(primaryConfig)], providerOptions };
   }
 
-  const fallback = await createModel(fallbackConfig);
+  const fallback = await createModel(fallbackConfig, {
+    extraBody: extraBodyFor(fallbackConfig, thinking, env),
+  });
   return {
     model: withFallback(primary, fallback, {
       retry429: env.LLM_FALLBACK_RETRY_429 === "true",
     }),
     modelChain: [modelLabel(primaryConfig), modelLabel(fallbackConfig)],
+    providerOptions,
   };
 }
 
@@ -112,7 +155,8 @@ export async function runQuery(
       system: buildSystemPrompt(ctx),
       prompt: question,
       tools: buildReadTools(kb, recorder),
-      stopWhen: stepCountIs(MAX_STEPS),
+      stopWhen: stepCountIs(resolveMaxSteps()),
+      providerOptions: resolved.providerOptions,
     });
     const trace = recorder.finalize("query", question, result.text, "success", modelChain);
     await traceStore(kb).save(trace);
@@ -128,14 +172,16 @@ export async function runQuery(
 export async function runMutation(
   kb: KnowledgeBase,
   instruction: string,
-  options: AgentOptions = {}
+  options: MutationOptions = {}
 ): Promise<MutationOutcome> {
+  // "maintain" gets its own model/thinking profile but reuses the mutate prompt.
+  const kind = options.kind ?? "mutate";
   const ctx = await promptContext(kb, "mutate");
   const recorder = new TraceRecorder();
   const filesChanged = new Set<string>();
   let modelChain: string[] = [];
   try {
-    const resolved = await resolveAgentModel(options, "mutate");
+    const resolved = await resolveAgentModel(options, kind);
     modelChain = resolved.modelChain;
     const result = await generateText({
       model: resolved.model,
@@ -145,8 +191,9 @@ export async function runMutation(
         ...buildReadTools(kb, recorder),
         ...buildWriteTools(kb, filesChanged, recorder, { modelChain }),
       },
-      stopWhen: stepCountIs(MAX_STEPS),
-      temperature: 0.2,
+      stopWhen: stepCountIs(resolveMaxSteps()),
+      temperature: resolveMutationTemperature(),
+      providerOptions: resolved.providerOptions,
     });
     const trace = recorder.finalize("mutation", instruction, result.text, "success", modelChain);
     await traceStore(kb).save(trace);
@@ -205,7 +252,8 @@ export async function streamChat(
         ...buildReadTools(kb, recorder),
         ...buildWriteTools(kb, filesChanged, recorder, { modelChain }),
       },
-      stopWhen: stepCountIs(MAX_STEPS),
+      stopWhen: stepCountIs(resolveMaxSteps()),
+      providerOptions: resolved.providerOptions,
       onFinish: async ({ text }) => {
         // Persist only turns that actually touched the bundle.
         if (recorder.steps.length > 0) {

@@ -185,7 +185,19 @@ export async function discoverLlamaCppModel(baseURL: string): Promise<string> {
   return promise;
 }
 
-export async function createModel(cfg: ModelConfig): Promise<ResolvedLanguageModel> {
+export interface CreateModelOptions {
+  /**
+   * Keys shallow-merged into every OpenAI-format request body via a wrapping
+   * fetch (thinking toggle, reasoning_effort, LLM_EXTRA_BODY). Ignored for the
+   * anthropic format, which carries thinking through call-time providerOptions.
+   */
+  extraBody?: Record<string, unknown>;
+}
+
+export async function createModel(
+  cfg: ModelConfig,
+  opts: CreateModelOptions = {}
+): Promise<ResolvedLanguageModel> {
   let model = cfg.model;
   if (!model) {
     if (cfg.format === "openai") {
@@ -202,11 +214,88 @@ export async function createModel(cfg: ModelConfig): Promise<ResolvedLanguageMod
   switch (cfg.format) {
     case "anthropic":
       return createAnthropic({ baseURL: cfg.baseURL, apiKey: cfg.apiKey })(model) as ResolvedLanguageModel;
-    case "openai":
+    case "openai": {
+      // @ai-sdk/openai-compatible does forward unknown providerOptions keys, but
+      // only nested under the provider-name key and interleaved with its own body
+      // construction. A wrapping fetch that shallow-merges into the POST JSON is
+      // provider-name-independent and gives us exact control of the final body.
+      const inject = opts.extraBody && Object.keys(opts.extraBody).length > 0;
       return createOpenAICompatible({
         name: "custom",
         baseURL: normalizeV1(cfg.baseURL),
         apiKey: cfg.apiKey,
+        ...(inject ? { fetch: makeBodyInjectingFetch(() => opts.extraBody!) } : {}),
       })(model) as ResolvedLanguageModel;
+    }
   }
+}
+
+/**
+ * Wrap fetch so every POST with a JSON string body gets `extra()` shallow-merged
+ * in before the request goes out. Non-POST or non-JSON bodies pass through
+ * untouched. References the global `fetch` at call time so test stubs apply.
+ */
+export function makeBodyInjectingFetch(extra: () => Record<string, unknown>): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    if (init && typeof init.body === "string" && (init.method ?? "").toUpperCase() === "POST") {
+      try {
+        const parsed = JSON.parse(init.body);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          init = { ...init, body: JSON.stringify({ ...parsed, ...extra() }) };
+        }
+      } catch {
+        // Non-JSON POST body — forward unchanged.
+      }
+    }
+    return fetch(input, init);
+  }) as typeof fetch;
+}
+
+/**
+ * Whether thinking/reasoning is enabled for a task mode, from the LLM_THINKING
+ * env (csv of modes, or "*" for all). Empty/unset disables it everywhere.
+ */
+export function resolveThinking(env: NodeJS.ProcessEnv, mode: string): boolean {
+  const raw = env.LLM_THINKING?.trim();
+  if (!raw) return false;
+  if (raw === "*") return true;
+  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean)).has(mode);
+}
+
+function parseExtraBody(raw: string | undefined): Record<string, unknown> | undefined {
+  if (!raw || !raw.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    console.error("[understory] LLM_EXTRA_BODY is not valid JSON; ignoring.");
+  }
+  return undefined;
+}
+
+/**
+ * Request-body injection enabling thinking on an OpenAI-format endpoint:
+ * `chat_template_kwargs.enable_thinking` (the llama-server / Qwen convention),
+ * plus optional LLM_REASONING_EFFORT and any user LLM_EXTRA_BODY JSON.
+ */
+export function openaiThinkingBody(env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
+  const body: Record<string, unknown> = { chat_template_kwargs: { enable_thinking: true } };
+  if (env.LLM_REASONING_EFFORT) body.reasoning_effort = env.LLM_REASONING_EFFORT;
+  const extra = parseExtraBody(env.LLM_EXTRA_BODY);
+  if (extra) Object.assign(body, extra);
+  return body;
+}
+
+function thinkingBudgetTokens(env: NodeJS.ProcessEnv): number {
+  const n = Number(env.LLM_THINKING_BUDGET);
+  return Number.isFinite(n) && n > 0 ? n : 8000;
+}
+
+/** Call-time providerOptions enabling extended thinking on an Anthropic endpoint. */
+export function anthropicThinkingOptions(env: NodeJS.ProcessEnv = process.env): {
+  anthropic: { thinking: { type: "enabled"; budgetTokens: number } };
+} {
+  return { anthropic: { thinking: { type: "enabled", budgetTokens: thinkingBudgetTokens(env) } } };
 }

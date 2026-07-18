@@ -33,6 +33,16 @@ services:
       LOCAL_BASE_URL: ${LOCAL_BASE_URL:-}
       LOCAL_API_KEY: ${LOCAL_API_KEY:-}
       GIT_AUTOCOMMIT: ${GIT_AUTOCOMMIT:-false}
+      # Agent tuning
+      LLM_MAX_STEPS: ${LLM_MAX_STEPS:-12}                       # max tool-calling steps per run
+      LLM_MUTATION_TEMPERATURE: ${LLM_MUTATION_TEMPERATURE:-0.2} # sampling temperature for mutations
+      # Thinking / reasoning (per-mode: csv of query,mutate,chat,maintain, or "*")
+      LLM_THINKING: ${LLM_THINKING:-}
+      LLM_THINKING_BUDGET: ${LLM_THINKING_BUDGET:-8000}          # anthropic thinking token budget
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}            # openai-format reasoning_effort
+      LLM_EXTRA_BODY: ${LLM_EXTRA_BODY:-}                        # extra JSON merged into openai request bodies
+      # Prompt sizing
+      UNDERSTORY_TREE_BUDGET: ${UNDERSTORY_TREE_BUDGET:-4000}    # char budget for the tree in the system prompt
     restart: unless-stopped
 
 volumes:

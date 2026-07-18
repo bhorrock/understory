@@ -3,6 +3,8 @@ export interface PromptContext {
   existingTypes: string[];
   /** Compact tree listing to orient the agent without a tool round-trip. */
   treeSummary: string;
+  /** True when treeSummary is a degraded directory overview, not a full listing. */
+  treeDegraded?: boolean;
   mode: "query" | "mutate" | "chat";
 }
 
@@ -33,7 +35,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 ## Current bundle layout
 
 ${ctx.treeSummary || "(empty bundle)"}
-
+${ctx.treeDegraded ? "\nmemory is large; this is only a directory overview — ALWAYS search before concluding anything about contents.\n" : ""}
 ${modeSection(ctx.mode)}`;
 }
 
