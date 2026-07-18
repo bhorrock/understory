@@ -6,3 +6,6 @@ dist/
 .DS_Store
 coverage/
 demo-bundle/
+
+# Claude Code agent worktrees (session infrastructure, never project content)
+.claude/
