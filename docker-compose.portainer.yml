@@ -43,6 +43,11 @@ services:
       LLM_EXTRA_BODY: ${LLM_EXTRA_BODY:-}                        # extra JSON merged into openai request bodies
       # Prompt sizing
       UNDERSTORY_TREE_BUDGET: ${UNDERSTORY_TREE_BUDGET:-4000}    # char budget for the tree in the system prompt
+      # Hybrid search: embeddings (empty base URL → FTS/BM25-only)
+      LLM_EMBEDDING_API_BASE_URL: ${LLM_EMBEDDING_API_BASE_URL:-} # OpenAI-compatible /v1/embeddings endpoint
+      LLM_EMBEDDING_API_KEY: ${LLM_EMBEDDING_API_KEY:-}          # default "not-needed"
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-}              # empty → discovered from /v1/models
+      LLM_EMBEDDING_DIMS: ${LLM_EMBEDDING_DIMS:-}               # empty → learned from first response
     restart: unless-stopped
 
 volumes:

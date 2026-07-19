@@ -33,7 +33,7 @@ export function buildReadTools(kb: KnowledgeBase, trace?: TraceRecorder) {
   return {
     search_knowledge: tool({
       description:
-        "Search the knowledge base by keywords, optionally filtered by concept type and/or tags. Returns ranked hits with paths and snippets. NOTE: matching is keyword-based, not semantic — a miss does NOT mean the knowledge is absent; it may be worded differently.",
+        "Search the knowledge base by keywords, optionally filtered by concept type and/or tags. Returns ranked hits with paths and snippets. NOTE: matching is keyword-based, not semantic — a miss does NOT mean the knowledge is absent; it may be worded differently. When the embedding tier is warm, semantic matching may also be active, so conceptually-related wording can match — but a miss is still not proof of absence.",
       inputSchema: z.object({
         query: z.string().describe("Keywords to search for. May be empty when filtering by type/tags only."),
         type: z.string().optional().describe("Exact concept type filter"),

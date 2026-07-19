@@ -17,7 +17,7 @@ const LEGACY_NOTICE =
   "[understory] using legacy env vars. Migrate to LLM_API_BASE_URL + LLM_API_KEY + LLM_API_FORMAT.";
 
 /** Ensure the URL ends in /v1 — llama-server serves the OpenAI API there. */
-function normalizeV1(baseURL: string): string {
+export function normalizeV1(baseURL: string): string {
   const trimmed = baseURL.replace(/\/+$/, "");
   return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
 }
@@ -298,4 +298,89 @@ export function anthropicThinkingOptions(env: NodeJS.ProcessEnv = process.env): 
   anthropic: { thinking: { type: "enabled"; budgetTokens: number } };
 } {
   return { anthropic: { thinking: { type: "enabled", budgetTokens: thinkingBudgetTokens(env) } } };
+}
+
+// ── Embeddings (Phase 4 — vector search tier) ─────────────────────────────
+
+/**
+ * Configuration for the OpenAI-compatible `/v1/embeddings` endpoint that powers
+ * the vector search tier. `model` may be empty (discovered from /v1/models on
+ * first use); `dims` may be undefined (learned from the first response).
+ */
+export interface EmbeddingConfig {
+  baseURL: string;
+  apiKey: string;
+  model: string;
+  dims?: number;
+}
+
+/**
+ * Resolve the embedding endpoint from the environment. `LLM_EMBEDDING_API_BASE_URL`
+ * enables the vector tier; without it the search index stays FTS-only. Returns
+ * null when unset (the universal, always-valid default).
+ */
+export function resolveEmbeddingConfig(env: NodeJS.ProcessEnv = process.env): EmbeddingConfig | null {
+  if (!env.LLM_EMBEDDING_API_BASE_URL) return null;
+  const cfg: EmbeddingConfig = {
+    baseURL: env.LLM_EMBEDDING_API_BASE_URL,
+    apiKey: env.LLM_EMBEDDING_API_KEY ?? "not-needed",
+    model: env.LLM_EMBEDDING_MODEL ?? "",
+  };
+  const dims = Number(env.LLM_EMBEDDING_DIMS);
+  if (Number.isFinite(dims) && dims > 0) cfg.dims = Math.floor(dims);
+  return cfg;
+}
+
+/**
+ * The embedder identity stamped into index meta so a changed endpoint/model/dims
+ * invalidates the stored vectors. `${normalizeV1(baseURL)}|${model}|${dims}`.
+ */
+export function embedderId(baseURL: string, model: string, dims: number): string {
+  return `${normalizeV1(baseURL)}|${model}|${dims}`;
+}
+
+/**
+ * Ensure the embedding config has a concrete model id, discovering it from the
+ * endpoint's /v1/models when `LLM_EMBEDDING_MODEL` was left blank. Mutates and
+ * returns the same object so callers keep one resolved config.
+ */
+export async function resolveEmbeddingModel(cfg: EmbeddingConfig): Promise<EmbeddingConfig> {
+  if (!cfg.model) cfg.model = await discoverLlamaCppModel(cfg.baseURL);
+  return cfg;
+}
+
+/**
+ * Embed a batch of texts via the OpenAI-compatible `/v1/embeddings` endpoint.
+ *
+ * Implemented with a plain fetch POST rather than the AI SDK's `embedMany`: it
+ * gives exact control over the request/response shape (needed to learn `dims`
+ * from the first response and to keep the deterministic-vector test stub simple),
+ * mirrors the body-injecting-fetch philosophy the chat path already uses, and
+ * avoids the SDK's internal batching/reordering. Results are index-ordered.
+ */
+export async function embedTexts(cfg: EmbeddingConfig, texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  if (!cfg.model) throw new Error("embedding model unresolved (call resolveEmbeddingModel first)");
+  const url = `${normalizeV1(cfg.baseURL)}/embeddings`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${cfg.apiKey}`,
+    },
+    body: JSON.stringify({ model: cfg.model, input: texts }),
+  });
+  if (!res.ok) {
+    throw new Error(`embeddings request failed: ${res.status} at ${url}`);
+  }
+  const body = (await res.json()) as {
+    data?: { embedding: number[]; index?: number }[];
+  };
+  const data = body.data ?? [];
+  if (data.length !== texts.length) {
+    throw new Error(`embeddings returned ${data.length} vectors for ${texts.length} inputs`);
+  }
+  return [...data]
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map((d) => d.embedding);
 }

@@ -114,6 +114,22 @@ export class KnowledgeBase {
     return this.indexPromise;
   }
 
+  /**
+   * Which search tier is in effect: "naive" (no index db), "fts" (index but no
+   * vector worker), or "hybrid" (embedding worker running). Opens the index
+   * lazily, like `search()`.
+   */
+  async searchTier(): Promise<"naive" | "fts" | "hybrid"> {
+    const idx = await this.ensureIndex();
+    return idx ? idx.tier : "naive";
+  }
+
+  /** True once the vector tier has embedded every chunk (contributing to hits). */
+  async embeddingWarm(): Promise<boolean> {
+    const idx = await this.ensureIndex();
+    return idx?.embeddingWarm ?? false;
+  }
+
   listTypes(): Promise<string[]> {
     return this.cachedScan("listTypes", () => listTypes(this.bundle));
   }

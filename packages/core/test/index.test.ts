@@ -287,6 +287,29 @@ describe.skipIf(!canNative)("FTS search index", () => {
     });
   });
 
+  describe("chunk population (Phase 4 sync)", () => {
+    it("populates the chunks table with identity-prefixed, unembedded rows", async () => {
+      const root = await makeBundle([
+        {
+          path: "/tables/customers.md",
+          frontmatter: { type: "Table", title: "Customers", description: "CRM records" },
+          body: "Holds email addresses.\n\n# Detail\nmore text here",
+        },
+      ]);
+      const idx = await openIndexDb(root);
+      expect(idx).not.toBeNull();
+      cleanup.push(() => idx!.db.close());
+      const rows = idx!.db
+        .prepare("SELECT seq, text, embedded FROM chunks WHERE path = ? ORDER BY seq")
+        .all("/tables/customers.md") as { seq: number; text: string; embedded: number }[];
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      for (const r of rows) {
+        expect(r.embedded).toBe(0);
+        expect(r.text.startsWith("Customers — CRM records:\n")).toBe(true);
+      }
+    });
+  });
+
   describe("openIndexDb", () => {
     it("opens with a schema and reports vec availability as a boolean", async () => {
       const root = await makeBundle([]);
