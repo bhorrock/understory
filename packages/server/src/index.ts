@@ -7,6 +7,7 @@ import { KnowledgeBase, resolveFallbackConfig, resolveModelConfig } from "@under
 import { mcpRouter } from "./mcp/http.js";
 import { browseRouter } from "./api/browse.js";
 import { chatRouter } from "./api/chat.js";
+import { statsRouter } from "./api/stats.js";
 import { bearerAuth } from "./auth.js";
 
 const bundleRoot = process.env.BUNDLE_ROOT;
@@ -71,6 +72,7 @@ if (authToken) {
 app.use("/mcp", mcpRouter(kb));
 app.use("/api", browseRouter(kb));
 app.use("/api", chatRouter(kb));
+app.use("/api", statsRouter(kb));
 
 // Serve the built web UI in production (single container), with SPA fallback.
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");

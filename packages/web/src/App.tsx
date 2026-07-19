@@ -5,11 +5,13 @@ import { ConceptView } from "./components/ConceptView";
 import { LogView } from "./components/LogView";
 import { ChatPanel } from "./components/ChatPanel";
 import { GraphView } from "./components/GraphView";
+import { StatsView } from "./components/StatsView";
 
 type View =
   | { kind: "concept"; path: string }
   | { kind: "log" }
   | { kind: "graph" }
+  | { kind: "stats" }
   | { kind: "empty" };
 
 export default function App() {
@@ -183,6 +185,12 @@ export default function App() {
             Graph
           </button>
           <button
+            onClick={() => setView({ kind: "stats" })}
+            className={`flex-1 border-l border-zinc-800 px-3 py-2 hover:bg-zinc-800 ${view.kind === "stats" ? "text-cyan-300" : "text-zinc-400"}`}
+          >
+            Stats
+          </button>
+          <button
             onClick={() => setChatOpen(!chatOpen)}
             className="flex-1 border-l border-zinc-800 px-3 py-2 text-zinc-400 hover:bg-zinc-800"
           >
@@ -206,6 +214,7 @@ export default function App() {
         {!error && view.kind === "graph" && (
           <GraphView refreshKey={graphRefreshKey} onNavigate={openConcept} />
         )}
+        {!error && view.kind === "stats" && <StatsView />}
       </main>
 
       {/* Chat */}
