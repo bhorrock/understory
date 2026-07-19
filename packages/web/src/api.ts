@@ -77,6 +77,39 @@ export interface AppConfig {
   fallbackConfigured: boolean;
 }
 
+export interface Distribution {
+  avg: number;
+  p50: number;
+  p95: number;
+}
+
+export interface ModelChainStat {
+  chain: string;
+  count: number;
+  failures: number;
+}
+
+export interface TraceStats {
+  total: number;
+  byKind: { query: number; mutation: number; chat: number };
+  byOutcome: { success: number; partial: number; failed: number };
+  steps: Distribution;
+  durationMs: Distribution;
+  byModelChain: ModelChainStat[];
+}
+
+export interface EventStats {
+  total: number;
+  byAction: Record<string, number>;
+  perDay: { date: string; count: number }[];
+  topPaths: { path: string; count: number }[];
+}
+
+export interface Stats {
+  traces: TraceStats;
+  events: EventStats;
+}
+
 const TOKEN_KEY = "understory-token";
 
 export function getAuthToken(): string {
@@ -117,4 +150,5 @@ export const api = {
   traces: () => get<TraceSummary[]>("/api/traces"),
   trace: (id: string) => get<QueryTrace>(`/api/trace?id=${encodeURIComponent(id)}`),
   config: () => get<AppConfig>("/api/config"),
+  stats: () => get<Stats>("/api/stats"),
 };

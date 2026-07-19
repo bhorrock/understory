@@ -124,6 +124,10 @@ BUNDLE_ROOT=./sample-bundle node packages/server/dist/index.js
 
 Works behind llama-swap too: discovery prefers the currently **loaded** model so a query doesn't trigger a multi-minute model swap. Pin a specific model with `LLM_MODEL=`.
 
+### DGX Spark / local hybrid setup
+
+Running fully local on an NVIDIA DGX Spark (or any host with a llama.cpp/vLLM chat model plus an embeddings endpoint)? See **[docs/DGX-SPARK.md](docs/DGX-SPARK.md)** and the ready-made [docker-compose.spark.yml](docker-compose.spark.yml): container-to-host topology, chat + embedding server invocations, per-mode thinking config, a full env-var reference, and a git-backup note.
+
 ## From source
 
 ```bash

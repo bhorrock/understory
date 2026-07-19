@@ -78,13 +78,15 @@ export function browseRouter(kb: KnowledgeBase): Router {
     res.json(await kb.listTypes());
   });
 
-  router.get("/config", (_req, res) => {
+  router.get("/config", async (_req, res) => {
     const config = resolveModelConfig();
     const fallback = resolveFallbackConfig();
     res.json({
       model: config.model,
       format: config.format,
       fallbackConfigured: fallback !== null,
+      search: await kb.searchTier(),
+      embeddingWarm: await kb.embeddingWarm(),
     });
   });
 

@@ -9,7 +9,28 @@ import type { Bundle } from "./bundle.js";
  * bullet list of `[Title](relative-url) - description`, subdirectories included.
  * The root index.md carries the only frontmatter allowed in an index: okf_version.
  */
-export async function regenerateIndex(bundle: Bundle, dir = "/"): Promise<string> {
+/** Cached per-directory recursive summary (concept count, distinct types, first titles). */
+export interface DirSummary {
+  count: number;
+  /** Distinct types, pre-sorted so formatting is stable. */
+  types: string[];
+  /** Up to the first three titles, in walk order. */
+  titles: string[];
+}
+
+/**
+ * Per-directory summary cache, keyed by absolute directory path. Owned by
+ * KnowledgeBase, which invalidates the touched chain before regen. Absent cache
+ * → every directory is walked (the original behavior), so callers/tests that
+ * pass no cache are unaffected.
+ */
+export type IndexCache = Map<string, DirSummary>;
+
+export async function regenerateIndex(
+  bundle: Bundle,
+  dir = "/",
+  cache?: IndexCache
+): Promise<string> {
   const absDir = bundle.resolve(dir);
   const isRoot = absDir === bundle.root;
   const entries = await fs.readdir(absDir, { withFileTypes: true });
@@ -20,7 +41,7 @@ export async function regenerateIndex(bundle: Bundle, dir = "/"): Promise<string
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.name.startsWith(".")) continue;
     if (entry.isDirectory()) {
-      const summary = await summarizeDirectory(path.join(absDir, entry.name));
+      const summary = await summarizeDirectory(path.join(absDir, entry.name), cache);
       dirLines.push(`* [${entry.name}](${entry.name}/) - ${summary}`);
       continue;
     }
@@ -55,12 +76,16 @@ export async function regenerateIndex(bundle: Bundle, dir = "/"): Promise<string
 }
 
 /** Regenerate index.md for a directory and every ancestor up to the root. */
-export async function regenerateIndexChain(bundle: Bundle, dir: string): Promise<void> {
+export async function regenerateIndexChain(
+  bundle: Bundle,
+  dir: string,
+  cache?: IndexCache
+): Promise<void> {
   let current = bundle.resolve(dir);
   // If given a file path, start from its directory.
   if (current.endsWith(".md")) current = path.dirname(current);
   while (true) {
-    await regenerateIndex(bundle, bundle.toBundlePath(current));
+    await regenerateIndex(bundle, bundle.toBundlePath(current), cache);
     if (current === bundle.root) break;
     current = path.dirname(current);
   }
@@ -73,9 +98,20 @@ function capitalize(s: string): string {
 /**
  * One-line deterministic summary of a directory's contents for index listings:
  * concept count, distinct types, and the first few titles — always derivable,
- * always current, no LLM.
+ * always current, no LLM. Consults `cache` (keyed by absolute dir) before
+ * walking; the formatted output is identical whether cached or freshly walked.
  */
-async function summarizeDirectory(absDir: string): Promise<string> {
+async function summarizeDirectory(absDir: string, cache?: IndexCache): Promise<string> {
+  let summary = cache?.get(absDir);
+  if (!summary) {
+    summary = await computeDirSummary(absDir);
+    cache?.set(absDir, summary);
+  }
+  return formatDirSummary(summary);
+}
+
+/** Walk a directory tree once, collecting the recursive {@link DirSummary}. */
+async function computeDirSummary(absDir: string): Promise<DirSummary> {
   const titles: string[] = [];
   const types = new Set<string>();
   let count = 0;
@@ -112,8 +148,14 @@ async function summarizeDirectory(absDir: string): Promise<string> {
   };
   await walk(absDir);
 
-  if (count === 0) return "empty";
-  const typeList = [...types].sort().join(", ");
-  const titleList = titles.join(", ") + (count > titles.length ? ", …" : "");
-  return `${count} concept${count === 1 ? "" : "s"}${typeList ? ` (${typeList})` : ""}: ${titleList}`;
+  return { count, types: [...types].sort(), titles };
+}
+
+/** Render a {@link DirSummary} to the index bullet text (stable formatting). */
+function formatDirSummary(summary: DirSummary): string {
+  if (summary.count === 0) return "empty";
+  const typeList = summary.types.join(", ");
+  const titleList =
+    summary.titles.join(", ") + (summary.count > summary.titles.length ? ", …" : "");
+  return `${summary.count} concept${summary.count === 1 ? "" : "s"}${typeList ? ` (${typeList})` : ""}: ${titleList}`;
 }

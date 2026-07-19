@@ -7,6 +7,7 @@ import { KnowledgeBase, resolveFallbackConfig, resolveModelConfig } from "@under
 import { mcpRouter } from "./mcp/http.js";
 import { browseRouter } from "./api/browse.js";
 import { chatRouter } from "./api/chat.js";
+import { statsRouter } from "./api/stats.js";
 import { bearerAuth } from "./auth.js";
 
 const bundleRoot = process.env.BUNDLE_ROOT;
@@ -71,6 +72,7 @@ if (authToken) {
 app.use("/mcp", mcpRouter(kb));
 app.use("/api", browseRouter(kb));
 app.use("/api", chatRouter(kb));
+app.use("/api", statsRouter(kb));
 
 // Serve the built web UI in production (single container), with SPA fallback.
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
@@ -82,6 +84,23 @@ if (existsSync(webDist)) {
 }
 
 const port = Number(process.env.PORT ?? 3800);
-app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`understory serving bundle ${bundleRoot} on :${port} (web + /api + /mcp)`);
 });
+
+// Graceful shutdown: stop the background embed worker and close the index db.
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[understory] ${signal} received, shutting down`);
+  server.close();
+  try {
+    await kb.close();
+  } catch {
+    // best-effort
+  }
+  process.exit(0);
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
