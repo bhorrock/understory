@@ -1,0 +1,63 @@
+# DGX Spark (GB10, ARM64, 128GB unified) — understory container talking to
+# host-side llama.cpp servers over host.docker.internal. See docs/DGX-SPARK.md
+# for the full topology, llama-server invocations, and the env reference.
+#
+#   docker compose -f docker-compose.spark.yml up -d
+#
+# The chat model runs on the host at :8080 and the embedding model at :8081
+# (or a single llama-swap port for both — discovery prefers the loaded model).
+services:
+  understory:
+    image: ghcr.io/thecodacus/understory:latest
+    ports:
+      - "3800:3800"
+    # Reach host-side llama-server(s) from inside the container. On Linux this
+    # maps host.docker.internal to the docker bridge gateway so the URLs below
+    # resolve to services bound on the Spark's host network.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Persistent OKF bundle. Swap for a bind mount (e.g. /srv/okf-bundle:/bundle)
+      # to edit the markdown from the host or sync it with git.
+      - okf-bundle:/bundle
+    environment:
+      BUNDLE_ROOT: /bundle
+      PORT: ${PORT:-3800}
+      # Required before exposing understory beyond localhost. Generate one with:
+      #   AUTH_TOKEN=$(openssl rand -hex 24)
+      AUTH_TOKEN: ${AUTH_TOKEN:?set AUTH_TOKEN — e.g. AUTH_TOKEN=$(openssl rand -hex 24)}
+      # ── Primary model: host llama-server chat model on :8080 ──────────────
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-http://host.docker.internal:8080}
+      LLM_API_KEY: ${LLM_API_KEY:-not-needed}
+      LLM_API_FORMAT: ${LLM_API_FORMAT:-openai}
+      LLM_MODEL: ${LLM_MODEL:-}                                 # empty → discovered from /v1/models
+      # ── Fallback model (optional; e.g. a cloud API for overflow) ──────────
+      LLM_FALLBACK_API_BASE_URL: ${LLM_FALLBACK_API_BASE_URL:-}
+      LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
+      LLM_FALLBACK_API_FORMAT: ${LLM_FALLBACK_API_FORMAT:-openai}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
+      LLM_FALLBACK_ALLOW_FOR: ${LLM_FALLBACK_ALLOW_FOR:-query}  # restrict fallback to these modes
+      LLM_FALLBACK_RETRY_429: ${LLM_FALLBACK_RETRY_429:-false}  # also fail over on 429 (rate-limit) responses
+      # ── Git backup: local-only commits (see docs/DGX-SPARK.md for push) ───
+      GIT_AUTOCOMMIT: ${GIT_AUTOCOMMIT:-true}
+      # ── Agent tuning ──────────────────────────────────────────────────────
+      LLM_MAX_STEPS: ${LLM_MAX_STEPS:-12}                       # max tool-calling steps per run
+      LLM_MUTATION_TEMPERATURE: ${LLM_MUTATION_TEMPERATURE:-0.6} # 0.6 recommended when thinking is on for mutations
+      # ── Thinking / reasoning ──────────────────────────────────────────────
+      # Qwen3.6 guidance: thinking ON for mutate/maintain, OFF for query/chat.
+      # Maps to chat_template_kwargs.enable_thinking via body injection.
+      LLM_THINKING: ${LLM_THINKING:-mutate,maintain}
+      LLM_THINKING_BUDGET: ${LLM_THINKING_BUDGET:-8000}          # anthropic-format thinking token budget
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}            # openai-format reasoning_effort
+      LLM_EXTRA_BODY: ${LLM_EXTRA_BODY:-}                        # extra JSON merged into openai request bodies
+      # ── Prompt sizing ─────────────────────────────────────────────────────
+      UNDERSTORY_TREE_BUDGET: ${UNDERSTORY_TREE_BUDGET:-4000}    # char budget for the tree in the system prompt
+      # ── Hybrid search: embeddings on host :8081 (empty → FTS/BM25-only) ───
+      LLM_EMBEDDING_API_BASE_URL: ${LLM_EMBEDDING_API_BASE_URL:-http://host.docker.internal:8081}
+      LLM_EMBEDDING_API_KEY: ${LLM_EMBEDDING_API_KEY:-not-needed}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-}             # empty → discovered from /v1/models
+      LLM_EMBEDDING_DIMS: ${LLM_EMBEDDING_DIMS:-}              # empty → learned from first response
+    restart: unless-stopped
+
+volumes:
+  okf-bundle:
