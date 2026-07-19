@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>understory — architecture field guide</title>
+<style>
+  :root {
+    --loam: #111814;
+    --panel: #1A231D;
+    --panel-2: #202B24;
+    --ink: #E9EDE4;
+    --lichen: #8FA091;
+    --moss: #A3C585;
+    --amber: #D9A441;
+    --clay: #C4795A;
+    --rule: #33402F;
+    --frame: #465243;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: "Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --loam: #EFF2E9;
+      --panel: #FFFFFF;
+      --panel-2: #E4E9DC;
+      --ink: #22301F;
+      --lichen: #5D6B58;
+      --moss: #4C7A3D;
+      --amber: #9A6E1B;
+      --clay: #96543B;
+      --rule: #C9D2BF;
+      --frame: #A9B49E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --loam: #111814; --panel: #1A231D; --panel-2: #202B24; --ink: #E9EDE4;
+    --lichen: #8FA091; --moss: #A3C585; --amber: #D9A441; --clay: #C4795A;
+    --rule: #33402F; --frame: #465243;
+  }
+  :root[data-theme="light"] {
+    --loam: #EFF2E9; --panel: #FFFFFF; --panel-2: #E4E9DC; --ink: #22301F;
+    --lichen: #5D6B58; --moss: #4C7A3D; --amber: #9A6E1B; --clay: #96543B;
+    --rule: #C9D2BF; --frame: #A9B49E;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--loam);
+    color: var(--ink);
+    font-family: var(--sans);
+    overflow: hidden;
+    line-height: 1.5;
+  }
+
+  .deck { position: relative; height: 100vh; width: 100vw; overflow: hidden; }
+  .track {
+    display: flex;
+    height: 100%;
+    transition: transform 420ms cubic-bezier(.22,.8,.3,1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .track { transition: none; }
+  }
+
+  .plate {
+    flex: 0 0 100vw;
+    height: 100%;
+    padding: 2.2rem 2.4rem 3.4rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .plate-inner {
+    height: 100%;
+    min-height: 0;
+    border: 1px solid var(--frame);
+    outline: 1px solid var(--frame);
+    outline-offset: 3px;
+    padding: 1.6rem 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--lichen);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 0.55rem;
+  }
+  .eyebrow .plate-no { color: var(--moss); }
+
+  h1, h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    margin: 0;
+    text-wrap: balance;
+    letter-spacing: 0.005em;
+  }
+  h2 { font-size: clamp(1.5rem, 2.6vw, 2.1rem); }
+  .lede { color: var(--lichen); max-width: 62ch; margin: 0; font-size: 0.98rem; }
+
+  .content { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 1.6rem; flex: 1; min-height: 0; align-content: start; }
+  .content.single { grid-template-columns: minmax(0, 1fr); }
+  @media (max-width: 880px) { .content { grid-template-columns: minmax(0,1fr); } }
+
+  .diagram { min-width: 0; overflow-x: auto; align-self: start; }
+
+  /* ── field-note annotations ── */
+  .notes { display: flex; flex-direction: column; gap: 0.85rem; min-width: 0; }
+  .note { border-left: 2px solid var(--rule); padding-left: 0.9rem; }
+  .note b { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--moss); display: block; margin-bottom: 0.15rem; font-weight: 600; }
+  .note.amber b { color: var(--amber); }
+  .note.clay b { color: var(--clay); }
+  .note p { margin: 0; font-size: 0.88rem; color: var(--ink); }
+  .note code, .flow code, td code { font-family: var(--mono); font-size: 0.82em; color: var(--moss); background: var(--panel-2); padding: 0.08em 0.35em; border-radius: 3px; }
+
+  /* ── diagram boxes ── */
+  .box {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    padding: 0.65rem 0.85rem;
+    border-radius: 4px;
+    min-width: 0;
+  }
+  .box .tag { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lichen); display: block; margin-bottom: 0.15rem; }
+  .box .name { font-weight: 600; font-size: 0.92rem; }
+  .box .sub { font-size: 0.78rem; color: var(--lichen); margin-top: 0.15rem; }
+  .box.moss  { border-color: var(--moss);  border-left-width: 3px; }
+  .box.amber { border-color: var(--amber); border-left-width: 3px; }
+  .box.clay  { border-color: var(--clay);  border-left-width: 3px; }
+
+  .col { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+  .row { display: flex; gap: 0.55rem; align-items: stretch; min-width: 0; }
+  .row > .box { flex: 1; }
+
+  .arrow-down, .arrow-right {
+    color: var(--lichen);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    display: flex; align-items: center; justify-content: center;
+    gap: 0.4rem;
+  }
+  .arrow-down { padding: 0.15rem 0; }
+  .arrow-right { padding: 0 0.2rem; white-space: nowrap; }
+
+  .lane { border: 1px dashed var(--rule); border-radius: 6px; padding: 0.8rem; }
+  .lane > .lane-label { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--lichen); margin-bottom: 0.55rem; }
+
+  /* ── flow strip (pipeline) ── */
+  .flow { display: flex; align-items: stretch; gap: 0.45rem; min-width: max-content; }
+  .flow .box { flex: 0 0 auto; max-width: 13.5rem; }
+
+  /* ── table ── */
+  table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lichen); font-weight: 600; }
+  td.good { color: var(--moss); }
+  td.bad { color: var(--clay); }
+  td, th { font-variant-numeric: tabular-nums; }
+
+  /* ── cover ── */
+  .cover-inner { justify-content: center; text-align: left; gap: 1.4rem; }
+  .cover-title { font-size: clamp(2.6rem, 6vw, 4.6rem); line-height: 1.05; }
+  .cover-title .sprout { color: var(--moss); }
+  .cover-sub { font-size: clamp(1rem, 1.8vw, 1.25rem); color: var(--lichen); max-width: 56ch; }
+  .cover-meta { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.1em; color: var(--lichen); display: flex; gap: 1.8rem; flex-wrap: wrap; border-top: 1px solid var(--rule); padding-top: 1rem; }
+  .cover-meta span b { color: var(--moss); font-weight: 600; }
+
+  /* ── nav chrome ── */
+  .chrome {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.55rem 2.4rem;
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em;
+    color: var(--lichen);
+    background: color-mix(in srgb, var(--loam) 88%, transparent);
+    border-top: 1px solid var(--rule);
+    user-select: none;
+  }
+  .dots { display: flex; gap: 0.55rem; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    border: 1px solid var(--lichen); background: transparent;
+    padding: 0; cursor: pointer;
+  }
+  .dot[aria-current="true"] { background: var(--moss); border-color: var(--moss); }
+  .navbtn {
+    background: none; border: 1px solid var(--rule); color: var(--ink);
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em;
+    padding: 0.3rem 0.8rem; border-radius: 4px; cursor: pointer;
+  }
+  .navbtn:hover { border-color: var(--moss); color: var(--moss); }
+  .navbtn:disabled { opacity: 0.35; cursor: default; }
+  .dot:focus-visible, .navbtn:focus-visible { outline: 2px solid var(--moss); outline-offset: 2px; }
+  .keys { display: none; }
+  @media (min-width: 700px) { .keys { display: block; } }
+</style>
+</head>
+<body>
+<div class="deck">
+  <div class="track" id="track">
+
+    <!-- ═══════════ PLATE I — COVER ═══════════ -->
+    <section class="plate" aria-label="Plate I: Cover">
+      <div class="plate-inner cover-inner">
+        <div class="eyebrow"><span>A field guide to the architecture</span><span class="plate-no">Plate I</span></div>
+        <h1 class="cover-title">understory<span class="sprout"> 🌱</span><br>on the DGX&nbsp;Spark</h1>
+        <p class="cover-sub">A self-wiring, plain-markdown memory for agents — deterministic where it must be, model-driven where it should be. This guide walks the seven layers added in the scaling &amp; retrieval build: the event stream, the bounded prompts, hybrid search, the librarian, and the hardware it all grows on.</p>
+        <div class="cover-meta">
+          <span><b>bundle</b> plain markdown, OKF v0.1</span>
+          <span><b>model</b> Qwen3.6-35B-A3B · llama.cpp</span>
+          <span><b>host</b> GB10 · 128 GB unified · ARM64</span>
+          <span><b>tests</b> 114 green</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ PLATE II — TOPOLOGY ═══════════ -->
+    <section class="plate" aria-label="Plate II: System topology">
+      <div class="plate-inner">
+        <div class="eyebrow"><span>Where everything lives</span><span class="plate-no">Plate II</span></div>
+        <h2>One box, three surfaces, one source of truth</h2>
+        <div class="content">
+          <div class="diagram">
+            <div class="col">
+              <div class="lane">
+                <div class="lane-label">Clients</div>
+                <div class="row">
+                  <div class="box"><span class="tag">MCP · stdio / http</span><span class="name">Claude Code, agents</span><div class="sub">memory_query · add · update · status · maintain · history</div></div>
+                  <div class="box"><span class="tag">Browser</span><span class="name">Web UI</span><div class="sub">tree · graph · chat · trace replay · stats</div></div>
+                </div>
+              </div>
+              <div class="arrow-down">▼ &nbsp;Bearer AUTH_TOKEN on /mcp + /api</div>
+              <div class="lane">
+                <div class="lane-label">understory container · Express :3800</div>
+                <div class="row">
+                  <div class="box moss"><span class="tag">core</span><span class="name">KnowledgeBase</span><div class="sub">the single write path — serialized mutation queue</div></div>
+                  <div class="box moss"><span class="tag">core</span><span class="name">Librarian agent</span><div class="sub">tool loop over search / read / write / patch / history</div></div>
+                </div>
+              </div>
+              <div class="arrow-down">▼</div>
+              <div class="row">
+                <div class="lane" style="flex:1.4">
+                  <div class="lane-label">The bundle · source of truth</div>
+                  <div class="row">
+                    <div class="box"><span class="tag">markdown</span><span class="name">concepts/*.md</span><div class="sub">+ index.md · log.md (derived) · .events.jsonl</div></div>
+                    <div class="box"><span class="tag">derived · gitignored</span><span class="name">.index/ · .traces/</span><div class="sub">SQLite search index · run traces — rebuildable</div></div>
+                  </div>
+                </div>
+                <div class="lane" style="flex:1">
+                  <div class="lane-label">Spark host · llama.cpp</div>
+                  <div class="col">
+                    <div class="box clay"><span class="tag">:8080 · chat</span><span class="name">Qwen3.6-35B-A3B</span></div>
+                    <div class="box clay"><span class="tag">:8081 · /v1/embeddings</span><span class="name">embedding model</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <div class="note"><b>Design rule</b><p>Conformance is enforced in code, not prompts. The LLM decides <em>what</em> to change; the deterministic layer guarantees the result is a valid bundle.</p></div>
+            <div class="note"><b>Source of truth</b><p>Only the markdown is authoritative. Everything under <code>.index/</code> and <code>.traces/</code> is derived, disposable, and rebuilt from content hashes.</p></div>
+            <div class="note clay"><b>Models are plumbing</b><p>Any OpenAI-compatible endpoint works. Model discovery reads <code>/v1/models</code> and prefers the loaded model, so llama-swap works unmodified.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ PLATE III — DETERMINISTIC CORE ═══════════ -->
+    <section class="plate" aria-label="Plate III: The deterministic core">
+      <div class="plate-inner">
+        <div class="eyebrow"><span>What code guarantees, so the model doesn't have to</span><span class="plate-no">Plate III</span></div>
+        <h2>The deterministic core: every write passes the same gate</h2>
+        <div class="content">
+          <div class="diagram">
+            <div class="col">
+              <div class="box moss"><span class="tag">entry</span><span class="name">write_concept · patch_concept · delete_concept</span><div class="sub">frontmatter <code>type</code> required · paths sandboxed to bundle root · reserved names refused</div></div>
+              <div class="arrow-down">▼ &nbsp;serialized through the mutation queue</div>
+              <div class="box"><span class="name">afterMutation( )</span>
+                <div class="sub" style="margin-top:.4rem">
+                  <div class="row" style="flex-wrap:wrap; gap:.4rem">
+                    <div class="box amber" style="flex:1 1 10rem"><span class="tag">1</span>append event → <code>.events.jsonl</code></div>
+                    <div class="box" style="flex:1 1 10rem"><span class="tag">2</span>project <code>log.md</code> from events</div>
+                    <div class="box" style="flex:1 1 10rem"><span class="tag">3</span>regenerate <code>index.md</code> chain <span style="color:var(--moss)">(incremental)</span></div>
+                    <div class="box" style="flex:1 1 10rem"><span class="tag">4</span>resync search index (hash diff)</div>
+                    <div class="box" style="flex:1 1 10rem"><span class="tag">5</span>git autocommit <span style="color:var(--lichen)">(optional)</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="arrow-down">▼</div>
+              <div class="box"><span class="tag">always true afterwards</span><span class="name">a conformant OKF bundle</span><div class="sub">indexes current · log grouped newest-first · graph lintable · derived state in step</div></div>
+            </div>
+          </div>
+          <div class="notes">
+            <div class="note"><b>Why it matters locally</b><p>A 3B-active model can write mediocre prose, but it structurally cannot corrupt the bundle format — validation, indexing, and logging never pass through the model.</p></div>
+            <div class="note"><b>Graph health</b><p><code>memory_maintain</code> runs a deterministic lint — orphans, broken links, undated Events — then lets the agent wire the fixes.</p></div>
+            <div class="note"><b>Hand edits welcome</b><p>Edit any markdown file directly: content hashes (never mtimes) notice the change and derived state catches up on the next touch.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ PLATE IV — EVENT STREAM ═══════════ -->
+    <section class="plate" aria-label="Plate IV: Event stream and history">
+      <div class="plate-inner">
+        <div class="eyebrow"><span>Change over time is information</span><span class="plate-no">Plate IV</span></div>
+        <h2>The event stream: supersede in place, remember forever</h2>
+        <div class="content">
+          <div class="diagram">
+            <div class="col">
+              <div class="row">
+                <div class="box"><span class="tag">mutation</span><span class="name">“Moved to Bangalore”</span><div class="sub">concept updated in place — old fact removed, no contradiction left standing</div></div>
+                <div class="arrow-right">→</div>
+                <div class="box amber"><span class="tag">O(1) append</span><span class="name">.events.jsonl</span><div class="sub"><code>{ts, action, path, summary, traceId, modelChain}</code> — one line per mutation, unknown keys tolerated</div></div>
+              </div>
+              <div class="arrow-down">▼ &nbsp;projections &amp; consumers</div>
+              <div class="row" style="flex-wrap:wrap">
+                <div class="box" style="flex:1 1 11rem"><span class="tag">spec §7</span><span class="name">log.md</span><div class="sub">derived, human-readable, byte-compatible</div></div>
+                <div class="box" style="flex:1 1 11rem"><span class="tag">agent tool</span><span class="name">read_history</span><div class="sub">“when did X change?” — filter by path, action, date</div></div>
+                <div class="box" style="flex:1 1 11rem"><span class="tag">MCP · no LLM</span><span class="name">memory_history</span><div class="sub">deterministic history for any client</div></div>
+                <div class="box" style="flex:1 1 11rem"><span class="tag">/api/stats</span><span class="name">aggregates</span><div class="sub">mutations/day, most-touched paths</div></div>
+              </div>
+              <div class="arrow-down">▼</div>
+              <div class="box"><span class="tag">meaningful state changes</span><span class="name">Event concepts — /events/2026-07-moved-to-bangalore.md</span><div class="sub">dated, linked both ways: the concept states the new truth; the Event preserves that the change happened</div></div>
+            </div>
+          </div>
+          <div class="notes">
+            <div class="note amber"><b>System of record</b><p>The current snapshot stays clean for retrieval; the history stays queryable for questions about the past. Both, not either.</p></div>
+            <div class="note"><b>Legacy backfill</b><p>An existing <code>log.md</code> is backfilled into events on first touch — older bundles upgrade themselves.</p></div>
+            <div class="note"><b>Git as backup</b><p><code>GIT_AUTOCOMMIT</code> commits each mutation; <code>.events.jsonl</code> diffs as exactly one added line. Add a remote push for real backup.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ PLATE V — HYBRID RETRIEVAL ═══════════ -->
+    <section class="plate" aria-label="Plate V: Hybrid retrieval">
+      <div class="plate-inner">
+        <div class="eyebrow"><span>Recall in infrastructure, not prompts</span><span class="plate-no">Plate V</span></div>
+        <h2>Hybrid retrieval: keyword misses stop meaning “not found”</h2>
+        <div class="content single">
+          <div class="diagram">
+            <div class="flow">
+              <div class="box"><span class="tag">source</span><span class="name">concepts/*.md</span><div class="sub">sha256 per file — git checkouts don't fool it</div></div>
+              <div class="arrow-right">hash<br>diff →</div>
+              <div class="box moss"><span class="tag">.index/index.db</span><span class="name">SQLite</span><div class="sub">FTS5 (BM25, weighted title &gt; desc &gt; body) + sqlite-vec KNN + chunk table</div></div>
+              <div class="arrow-right">query →</div>
+              <div class="col" style="justify-content:center; gap:.4rem">
+                <div class="box"><span class="tag">always</span><span class="name">BM25 top-50</span></div>
+                <div class="box clay"><span class="tag">when warm</span><span class="name">vector KNN top-50</span><div class="sub">query embedded via :8081</div></div>
+              </div>
+              <div class="arrow-right">RRF<br>k=60 →</div>
+              <div class="box moss"><span class="tag">same contract</span><span class="name">search_knowledge hits</span><div class="sub">path · type · snippet · score — the librarian's tools never changed</div></div>
+            </div>
+            <div style="margin-top:1.2rem">
+              <table>
+                <tr><th>Tier</th><th>When</th><th>What you get</th></tr>
+                <tr><td><code>naive</code></td><td>native modules unavailable</td><td>the original O(N) scan — nothing ever breaks</td></tr>
+                <tr><td><code>fts</code></td><td>index open, no embedding endpoint</td><td class="good">BM25 in milliseconds, punctuation-safe</td></tr>
+                <tr><td><code>hybrid</code></td><td>embeddings configured &amp; warm</td><td class="good">“car” finds the automobile concept — semantic recall, fused ranks</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+        <p class="lede">Chunks embed in the background — batch 16, exponential backoff, never blocking a query. Change the embedding model and the index notices the identity mismatch, drops its vectors, and re-warms. BM25 keeps answering the whole time.</p>
+      </div>
+    </section>
+
+    <!-- ═══════════ PLATE VI — THE LIBRARIAN ═══════════ -->
+    <section class="plate" aria-label="Plate VI: The librarian agent">
+      <div class="plate-inner">
+        <div class="eyebrow"><span>The one mind in the system</span><span class="plate-no">Plate VI</span></div>
+        <h2>The librarian: four modes, one budget rule</h2>
+        <div class="content">
+          <div class="diagram">
+            <div class="col">
+              <div class="box"><span class="tag">system prompt · bounded</span><span class="name">altitude-adaptive bundle map</span><div class="sub">small memory → full listing · large memory → directories + types + counts, capped by <code>UNDERSTORY_TREE_BUDGET</code>. A 47,000-char tree becomes a 4,700-char prompt.</div></div>
+              <div class="arrow-down">▼ &nbsp;tool loop · <code>LLM_MAX_STEPS</code> (default 12)</div>
+              <div class="row" style="flex-wrap:wrap">
+                <div class="box" style="flex:1 1 10rem"><span class="tag">query · chat</span><span class="name">thinking OFF</span><div class="sub">latency is the product; hybrid search carries recall</div></div>
+                <div class="box moss" style="flex:1 1 10rem"><span class="tag">mutate · maintain</span><span class="name">thinking ON</span><div class="sub">judgment persists: enrich-vs-create, contradiction checks, back-links</div></div>
+              </div>
+              <div class="arrow-down">▼ &nbsp;<code>LLM_THINKING=mutate,maintain</code> → body-injected <code>enable_thinking</code> for Qwen</div>
+              <div class="row" style="flex-wrap:wrap">
+                <div class="box" style="flex:1 1 9rem"><span class="tag">reads</span><span class="name">search · read · list · lint · history</span></div>
+                <div class="box" style="flex:1 1 9rem"><span class="tag">writes</span><span class="name">write · patch · delete</span><div class="sub">temp <code>LLM_MUTATION_TEMPERATURE</code> — 0.6 with thinking</div></div>
+                <div class="box" style="flex:1 1 9rem"><span class="tag">fallback</span><span class="name">cloud model chain</span><div class="sub">retryable errors roll to <code>LLM_FALLBACK_*</code></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <div class="note"><b>The budget rule</b><p>Spend deliberation where errors persist (writes, maintenance); spend infrastructure where errors are recoverable (reads). A bad read costs a retry; a bad write costs graph integrity.</p></div>
+            <div class="note"><b>Write protocol</b><p>Search first → enrich over create → link both ways → supersede contradictions → log the change. Enforced by prompt; mopped up by the deterministic lint.</p></div>
+            <div class="note amber"><b>Every run leaves a trace</b><p>Searches, reads, and writes record to <code>.traces/</code> with the model chain — replayable as numbered hops on the graph view.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ PLATE VII — SCALING ═══════════ -->
+    <section class="plate" aria-label="Plate VII: Scaling behavior">
+      <div class="plate-inner">
+        <div class="eyebrow"><span>What happens at 5,000 concepts</span><span class="plate-no">Plate VII</span></div>
+        <h2>Scaling: every O(N) cliff got a railing</h2>
+        <div class="content single">
+          <div class="diagram">
+            <table>
+              <tr><th>Pressure point</th><th>Before</th><th>Now</th></tr>
+              <tr><td>System prompt</td><td class="bad">full tree, uncapped — ~60k tokens at 5k concepts</td><td class="good">altitude-adaptive, bounded by char budget; degraded mode says “always search”</td></tr>
+              <tr><td>Search</td><td class="bad">O(N) file scan per query, literal keywords only</td><td class="good">SQLite FTS5 + vectors, incremental hash sync</td></tr>
+              <tr><td>Per-run scans</td><td class="bad">every concept read twice per agent run</td><td class="good">memoized — generation counter + 30 s TTL</td></tr>
+              <tr><td>index.md regen</td><td class="bad">whole bundle re-read on every write</td><td class="good">per-directory summary cache, touched chain only</td></tr>
+              <tr><td>log.md append</td><td class="bad">full rewrite, grows forever</td><td class="good">O(1) event append; log.md is a projection</td></tr>
+              <tr><td>Session seed</td><td class="bad">blind 3,000-char slice, alphabetical sample</td><td class="good">ranked by recency + link degree; degrades by altitude, never mid-word</td></tr>
+            </table>
+          </div>
+        </div>
+        <p class="lede">The pattern behind every fix: keep the current snapshot cheap to assemble, and make growth degrade <em>gracefully</em> — never silently. Nothing above changes what the librarian sees in its tools; it changes how much it costs to show it.</p>
+      </div>
+    </section>
+
+    <!-- ═══════════ PLATE VIII — DEPLOYMENT ═══════════ -->
+    <section class="plate" aria-label="Plate VIII: Deployment on the Spark">
+      <div class="plate-inner">
+        <div class="eyebrow"><span>Growing conditions</span><span class="plate-no">Plate VIII</span></div>
+        <h2>On the Spark: why an A3B MoE is the right plant for this soil</h2>
+        <div class="content">
+          <div class="diagram">
+            <div class="col">
+              <div class="lane">
+                <div class="lane-label">DGX Spark · GB10 · 128 GB unified · ~273 GB/s</div>
+                <div class="row" style="flex-wrap:wrap">
+                  <div class="box clay" style="flex:1.3 1 12rem"><span class="tag">llama-server :8080</span><span class="name">Qwen3.6-35B-A3B</span><div class="sub">35B total, 3B active — decode streams only the active experts, so the bandwidth-bound Spark stays fast. <code>--jinja</code> for tool calls.</div></div>
+                  <div class="box clay" style="flex:1 1 10rem"><span class="tag">llama-server :8081</span><span class="name">embedding model</span><div class="sub"><code>--embedding</code> · tiny footprint beside the chat model</div></div>
+                  <div class="box" style="flex:1 1 10rem"><span class="tag">docker-compose.spark.yml</span><span class="name">understory :3800</span><div class="sub">node:22-slim, glibc ARM64 prebuilds · <code>host.docker.internal</code> → both servers</div></div>
+                </div>
+              </div>
+              <div class="arrow-down">▼ &nbsp;watching it live</div>
+              <div class="row" style="flex-wrap:wrap">
+                <div class="box" style="flex:1 1 9rem"><span class="tag">/api/config</span><span class="name">search tier + warm state</span></div>
+                <div class="box" style="flex:1 1 9rem"><span class="tag">/api/stats</span><span class="name">steps, failures, per-model</span><div class="sub">is the local model actually handling the write protocol?</div></div>
+                <div class="box" style="flex:1 1 9rem"><span class="tag">graph view</span><span class="name">trace replay</span><div class="sub">watch a run hop the graph</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <div class="note clay"><b>Fit</b><p>Model at Q8 ≈ 40 GB; 128 GB unified leaves room for a 262K-token KV cache and the embedder — no offloading, no juggling.</p></div>
+            <div class="note"><b>Thinking on the Spark</b><p><code>LLM_THINKING=mutate,maintain</code> with temperature 0.6 — deliberation where writes persist, snappy everywhere else.</p></div>
+            <div class="note amber"><b>Escape hatches</b><p>Cloud fallback via <code>LLM_FALLBACK_*</code>; llama-swap for model juggling; everything is just an OpenAI-compatible URL.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ── chrome ── -->
+  <div class="chrome">
+    <span class="keys">← → to navigate</span>
+    <div class="dots" id="dots" role="tablist" aria-label="Plates"></div>
+    <div style="display:flex; align-items:center; gap:0.9rem">
+      <span id="counter">I / VIII</span>
+      <button class="navbtn" id="prev" aria-label="Previous plate">Prev</button>
+      <button class="navbtn" id="next" aria-label="Next plate">Next</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const track = document.getElementById("track");
+  const plates = track.children.length;
+  const roman = ["I","II","III","IV","V","VI","VII","VIII","IX","X"];
+  const dotsEl = document.getElementById("dots");
+  const counter = document.getElementById("counter");
+  const prevBtn = document.getElementById("prev");
+  const nextBtn = document.getElementById("next");
+  let i = 0;
+
+  for (let d = 0; d < plates; d++) {
+    const b = document.createElement("button");
+    b.className = "dot";
+    b.setAttribute("aria-label", "Plate " + roman[d]);
+    b.addEventListener("click", () => go(d));
+    dotsEl.appendChild(b);
+  }
+
+  function go(n) {
+    i = Math.max(0, Math.min(plates - 1, n));
+    track.style.transform = "translateX(-" + (i * 100) + "vw)";
+    counter.textContent = roman[i] + " / " + roman[plates - 1];
+    prevBtn.disabled = i === 0;
+    nextBtn.disabled = i === plates - 1;
+    [...dotsEl.children].forEach((d, k) => {
+      if (k === i) d.setAttribute("aria-current", "true");
+      else d.removeAttribute("aria-current");
+    });
+  }
+
+  prevBtn.addEventListener("click", () => go(i - 1));
+  nextBtn.addEventListener("click", () => go(i + 1));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); go(i + 1); }
+    if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); go(i - 1); }
+    if (e.key === "Home") { e.preventDefault(); go(0); }
+    if (e.key === "End") { e.preventDefault(); go(plates - 1); }
+  });
+
+  go(0);
+</script>
+
+</body>
+</html>
