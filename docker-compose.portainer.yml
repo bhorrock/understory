@@ -24,6 +24,7 @@ services:
       LLM_FALLBACK_API_FORMAT: ${LLM_FALLBACK_API_FORMAT:-openai}
       LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
       LLM_FALLBACK_ALLOW_FOR: ${LLM_FALLBACK_ALLOW_FOR:-query}
+      LLM_FALLBACK_RETRY_429: ${LLM_FALLBACK_RETRY_429:-false}   # also fail over on 429 (rate-limit) responses
       # Legacy compat (still supported)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
