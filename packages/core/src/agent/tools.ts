@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { KnowledgeBase } from "../okf/index.js";
-import type { TreeNode } from "../okf/types.js";
+import type { LogAction, TreeNode } from "../okf/types.js";
 import type { TraceRecorder } from "./trace.js";
 
 /** Bundle-relative concept path, e.g. "/tables/customers.md". */
@@ -19,6 +19,9 @@ const frontmatterSchema = z
   })
   .passthrough()
   .describe("YAML frontmatter. Additional producer-defined keys are allowed.");
+
+/** The three mutation kinds recorded in the event stream. */
+const logAction: z.ZodType<LogAction> = z.enum(["Creation", "Update", "Deletion"]);
 
 const logSummary = z
   .string()
@@ -77,6 +80,47 @@ export function buildReadTools(kb: KnowledgeBase, trace?: TraceRecorder) {
       execute: async () => {
         trace?.record("lint_knowledge", "", []);
         return kb.lint();
+      },
+    }),
+    read_history: tool({
+      description:
+        "Read the knowledge base's mutation history (append-only event log): when concepts were created/updated/deleted and why. Use for 'when did X change', 'what happened recently', supersession questions.",
+      inputSchema: z.object({
+        path_contains: z
+          .string()
+          .optional()
+          .describe("Only events whose concept path contains this substring"),
+        action: logAction.optional().describe("Filter by mutation kind"),
+        since: z.string().optional().describe("Inclusive lower bound on timestamp (ISO date)"),
+        until: z.string().optional().describe("Inclusive upper bound on timestamp (ISO date)"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .default(20)
+          .describe("Max events, newest-first (1..200)"),
+      }),
+      execute: async ({ path_contains, action, since, until, limit }) => {
+        const events = await kb.readEvents({
+          pathContains: path_contains,
+          action,
+          since,
+          until,
+          limit,
+        });
+        trace?.record(
+          "read_history",
+          path_contains ?? "",
+          events.map((e) => e.path).filter(Boolean)
+        );
+        // Return only the reader-relevant shape — traceId/modelChain are provenance noise here.
+        return events.map((e) => ({
+          ts: e.ts,
+          action: e.action,
+          path: e.path,
+          summary: e.summary,
+        }));
       },
     }),
   };

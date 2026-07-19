@@ -80,6 +80,8 @@ export function buildNotation(
         return "browse layout";
       case "lint_knowledge":
         return "lint graph";
+      case "read_history":
+        return `history (${s.paths.length})`;
       case "write_concept":
         return `write ${shortPath(s.paths[0] ?? "")}`;
       case "patch_concept":
