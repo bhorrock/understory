@@ -155,7 +155,7 @@ LLM_MUTATION_TEMPERATURE=0.6
 
 ### The escape hatch: LLM_EXTRA_BODY
 
-`LLM_EXTRA_BODY` is a JSON object shallow-merged into every OpenAI-format request body,
+`LLM_EXTRA_BODY` is a JSON object shallow-merged into the OpenAI-format request body,
 after the thinking keys. Use it to pass model- or server-specific parameters understory
 doesn't model directly — sampling knobs, custom `chat_template_kwargs`, etc.:
 
@@ -166,6 +166,13 @@ LLM_EXTRA_BODY={"top_p":0.8,"top_k":20,"chat_template_kwargs":{"enable_thinking"
 Because it merges last, `LLM_EXTRA_BODY` can override understory's own keys (including
 `enable_thinking`) if you need full manual control. `LLM_REASONING_EFFORT`, if set, is
 also included in the OpenAI-format body as `reasoning_effort`.
+
+**Both `LLM_EXTRA_BODY` and `LLM_REASONING_EFFORT` are injected only for modes where
+thinking is enabled** — they ride the same OpenAI-format body that carries
+`enable_thinking`, so they take effect only when a mode is listed in `LLM_THINKING` (and
+only for OpenAI-format endpoints). Under the recommended `LLM_THINKING=mutate,maintain`
+they apply to `mutate`/`maintain` runs and are silently ignored for `query`/`chat`. Set
+`LLM_THINKING=*` if you want them to apply to every mode.
 
 ## vLLM alternative
 
@@ -269,8 +276,8 @@ Defaults below are what understory's code applies when the variable is unset (no
 |---|---|---|
 | `LLM_THINKING` | unset (off) | CSV of task modes to enable thinking for (`query,mutate,chat,maintain`) or `*`. Recommended: `mutate,maintain`. |
 | `LLM_THINKING_BUDGET` | `8000` | Anthropic-format thinking token budget (ignored by OpenAI-format endpoints). |
-| `LLM_REASONING_EFFORT` | unset | OpenAI-format `reasoning_effort` (e.g. `low` / `medium` / `high`) injected into the request body when set. |
-| `LLM_EXTRA_BODY` | unset | JSON object shallow-merged (last) into every OpenAI-format request body. Escape hatch for arbitrary params, including custom `chat_template_kwargs`. |
+| `LLM_REASONING_EFFORT` | unset | OpenAI-format `reasoning_effort` (e.g. `low` / `medium` / `high`). Injected only for modes where `LLM_THINKING` is enabled (rides the same body as `enable_thinking`); ignored for other modes and for Anthropic-format endpoints. |
+| `LLM_EXTRA_BODY` | unset | JSON object shallow-merged (last) into the OpenAI-format request body. Injected only for modes where `LLM_THINKING` is enabled (rides the same body as `enable_thinking`); ignored for other modes and for Anthropic-format endpoints. Escape hatch for arbitrary params, including custom `chat_template_kwargs`. |
 
 ### Prompt sizing
 
@@ -305,10 +312,13 @@ degrading silently at runtime.
 At startup understory logs which search tier came up:
 
 - `[understory] search index: fts` — the SQLite index opened; full-text (BM25) search
-  is active.
+  is active. This line prints whenever the native index opens, **including in hybrid
+  mode** (it logs `fts` for any non-null index).
 - `[understory] search index: hybrid (embedding worker started)` — the index opened
   **and** an embedding endpoint was configured, so vectors warm in the background and
-  search fuses BM25 + semantic results.
+  search fuses BM25 + semantic results. In hybrid mode you see **both** this line and
+  the `fts` line above; the `hybrid (embedding worker started)` line is the definitive
+  indicator that vectors are active.
 - `[understory] search index: naive-fallback (...)` — the native index could not open
   (missing binding, corrupt DB, etc.); understory falls back to the in-process naive
   scan. The librarian's tool surface is unchanged — search still works, just without
