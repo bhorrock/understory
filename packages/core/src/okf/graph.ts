@@ -1,4 +1,5 @@
 import type { Bundle } from "./bundle.js";
+import type { ConceptFrontmatter } from "./types.js";
 
 export interface GraphNode {
   path: string;
@@ -24,6 +25,8 @@ export interface GraphScan extends GraphData {
   brokenLinks: { path: string; target: string }[];
   /** Inbound-degree per concept path (index/log catalogs don't count). */
   inbound: Map<string, number>;
+  /** Frontmatter per concept path — scan-internal, for lint checks (not the public graph). */
+  frontmatter: Map<string, ConceptFrontmatter>;
 }
 
 // Bundle-relative links to concepts: [text](/dir/concept.md)
@@ -40,6 +43,7 @@ export async function scanGraph(bundle: Bundle): Promise<GraphScan> {
   const known = new Set(paths);
 
   const nodes = new Map<string, GraphNode>();
+  const frontmatter = new Map<string, ConceptFrontmatter>();
   for (const p of paths) {
     let title: string | undefined;
     let type: string | undefined;
@@ -49,6 +53,7 @@ export async function scanGraph(bundle: Bundle): Promise<GraphScan> {
       const concept = await bundle.readConcept(p);
       body = concept.body;
       const fm = concept.frontmatter;
+      frontmatter.set(p, fm);
       if (typeof fm.title === "string") title = fm.title;
       if (typeof fm.type === "string") type = fm.type;
       if (typeof fm.description === "string") description = fm.description;
@@ -87,7 +92,7 @@ export async function scanGraph(bundle: Bundle): Promise<GraphScan> {
     nodes.get(edge.target)!.links++;
   }
 
-  return { nodes: [...nodes.values()], edges, brokenLinks, inbound };
+  return { nodes: [...nodes.values()], edges, brokenLinks, inbound, frontmatter };
 }
 
 /** Public graph shape for the API/UI (no scan internals). */

@@ -179,6 +179,50 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
   );
 
   server.registerTool(
+    "memory_history",
+    {
+      title: "Read mutation history",
+      description:
+        "Deterministic (no LLM): the knowledge base's append-only mutation history — when concepts were created/updated/deleted and why. Use for 'when did X change', 'what happened recently', supersession questions.",
+      inputSchema: {
+        path_contains: z
+          .string()
+          .optional()
+          .describe("Only events whose concept path contains this substring"),
+        action: z
+          .enum(["Creation", "Update", "Deletion"])
+          .optional()
+          .describe("Filter by mutation kind"),
+        since: z.string().optional().describe("Inclusive lower bound on timestamp (ISO date)"),
+        until: z.string().optional().describe("Inclusive upper bound on timestamp (ISO date)"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .default(20)
+          .describe("Max events, newest-first (1..200)"),
+      },
+    },
+    async ({ path_contains, action, since, until, limit }) => {
+      const events = await kb.readEvents({
+        pathContains: path_contains,
+        action,
+        since,
+        until,
+        limit,
+      });
+      const history = events.map((e) => ({
+        ts: e.ts,
+        action: e.action,
+        path: e.path,
+        summary: e.summary,
+      }));
+      return { content: [{ type: "text", text: JSON.stringify(history, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
     "memory_maintain",
     {
       title: "Maintain / repair memory",
