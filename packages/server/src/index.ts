@@ -84,6 +84,23 @@ if (existsSync(webDist)) {
 }
 
 const port = Number(process.env.PORT ?? 3800);
-app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`understory serving bundle ${bundleRoot} on :${port} (web + /api + /mcp)`);
 });
+
+// Graceful shutdown: stop the background embed worker and close the index db.
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[understory] ${signal} received, shutting down`);
+  server.close();
+  try {
+    await kb.close();
+  } catch {
+    // best-effort
+  }
+  process.exit(0);
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

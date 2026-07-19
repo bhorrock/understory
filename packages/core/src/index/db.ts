@@ -128,6 +128,76 @@ function initSchema(db: Database): void {
   ).run(String(SCHEMA_VERSION));
 }
 
+// ── Vector table lifecycle (Phase 4) ──────────────────────────────────────
+// The vec0 virtual table is created lazily, once the embedding dimensionality
+// is known (either from LLM_EMBEDDING_DIMS or learned from the first response),
+// because vec0 requires a fixed `float[N]` width at CREATE time.
+
+function getMeta(db: Database, key: string): string | undefined {
+  const row = db.prepare(`SELECT value FROM meta WHERE key = ?`).get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value;
+}
+
+function setMeta(db: Database, key: string, value: string): void {
+  db.prepare(
+    `INSERT INTO meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(key, value);
+}
+
+/** Whether the vec0 virtual table currently exists. */
+export function vecTableExists(db: Database): boolean {
+  const row = db
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vec'`)
+    .get();
+  return row !== undefined;
+}
+
+/** Drop the vec table and mark every chunk as needing re-embedding. */
+function resetVectors(db: Database): void {
+  db.exec(`DROP TABLE IF EXISTS vec`);
+  db.prepare(`UPDATE chunks SET embedded = 0`).run();
+  db.prepare(`DELETE FROM meta WHERE key IN ('embedder_id', 'embedder_dims')`).run();
+}
+
+/**
+ * Before embedding starts, detect an embedder change that we can already see
+ * from the (baseURL, model) pair alone — even without knowing dims yet. This
+ * matters because a stale index may have every chunk flagged `embedded = 1`, so
+ * without this the worker would find nothing to do and serve vectors from the
+ * *previous* model. Returns true when vectors were reset.
+ */
+export function earlyReconcileEmbedder(db: Database, baseURL: string, model: string): boolean {
+  const stored = getMeta(db, "embedder_id");
+  if (stored === undefined) return false;
+  const prefix = `${baseURL}|${model}|`;
+  if (stored.startsWith(prefix)) return false;
+  resetVectors(db);
+  return true;
+}
+
+/**
+ * Ensure the vec0 table exists at the given dimensionality and that the stored
+ * embedder identity matches `desiredId`. On mismatch the vectors are dropped and
+ * chunks reset so the worker re-embeds. Idempotent. Returns true when it reset.
+ */
+export function ensureVecTable(db: Database, desiredId: string, dims: number): boolean {
+  const stored = getMeta(db, "embedder_id");
+  let reset = false;
+  if (stored !== undefined && stored !== desiredId) {
+    resetVectors(db);
+    reset = true;
+  }
+  db.exec(
+    `CREATE VIRTUAL TABLE IF NOT EXISTS vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[${dims}])`
+  );
+  setMeta(db, "embedder_id", desiredId);
+  setMeta(db, "embedder_dims", String(dims));
+  return reset;
+}
+
 /** Attempt to load sqlite-vec. Non-fatal: BM25 works without it. */
 async function tryLoadVec(db: Database): Promise<boolean> {
   try {

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Bundle } from "../okf/bundle.js";
-import type { IndexDb } from "./db.js";
+import { vecTableExists, type IndexDb } from "./db.js";
+import { chunkConcept } from "./chunk.js";
 
 export interface SyncResult {
   added: number;
@@ -28,6 +29,7 @@ interface FileRow {
 export async function syncIndex(bundle: Bundle, idx: IndexDb): Promise<SyncResult> {
   const { db } = idx;
   const result: SyncResult = { added: 0, updated: 0, removed: 0 };
+  const hasVec = vecTableExists(db);
 
   const existing = new Map<string, string>();
   for (const r of db.prepare(`SELECT path, hash FROM files`).all() as {
@@ -50,8 +52,23 @@ export async function syncIndex(bundle: Bundle, idx: IndexDb): Promise<SyncResul
     `INSERT INTO fts (path, title, description, tags, body)
      VALUES (@path, @title, @description, @tags, @body)`
   );
+  const selectChunkIds = db.prepare(`SELECT id FROM chunks WHERE path = ?`);
   const deleteChunks = db.prepare(`DELETE FROM chunks WHERE path = ?`);
+  const insertChunk = db.prepare(
+    `INSERT INTO chunks (path, seq, text, embedded) VALUES (@path, @seq, @text, 0)`
+  );
+  const deleteVec = hasVec ? db.prepare(`DELETE FROM vec WHERE chunk_id = ?`) : null;
   const deleteFile = db.prepare(`DELETE FROM files WHERE path = ?`);
+
+  /** Drop a path's chunk rows and their vectors (vec rowid = chunk id). */
+  const purgeChunks = (path: string) => {
+    if (deleteVec) {
+      for (const { id } of selectChunkIds.all(path) as { id: number }[]) {
+        deleteVec.run(BigInt(id));
+      }
+    }
+    deleteChunks.run(path);
+  };
 
   const writeFile = db.transaction((row: FileRow) => {
     const indexed_at = new Date().toISOString();
@@ -73,13 +90,21 @@ export async function syncIndex(bundle: Bundle, idx: IndexDb): Promise<SyncResul
       tags: tagsToText(row.tags),
       body: row.body,
     });
-    // Changed content invalidates any embeddings; Phase 4 re-populates chunks.
-    deleteChunks.run(row.path);
+    // Changed content invalidates any embeddings: drop old chunks + vectors and
+    // re-chunk the new body as unembedded rows for the worker to pick up.
+    purgeChunks(row.path);
+    for (const ch of chunkConcept({
+      path: row.path,
+      frontmatter: { title: row.title, description: row.description },
+      body: row.body,
+    })) {
+      insertChunk.run({ path: row.path, seq: ch.seq, text: ch.text });
+    }
   });
 
   const removeFile = db.transaction((path: string) => {
     deleteFts.run(path);
-    deleteChunks.run(path);
+    purgeChunks(path);
     deleteFile.run(path);
   });
 
