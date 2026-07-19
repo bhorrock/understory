@@ -15,6 +15,7 @@ import { searchBundle, listTypes, type SearchOptions } from "./search.js";
 import { validateBundle } from "./validate.js";
 import { lintBundle, type LintReport } from "./lint.js";
 import { buildGraph, type GraphData } from "./graph.js";
+import { SearchIndex } from "../index/search-index.js";
 import type {
   Concept,
   ConceptFrontmatter,
@@ -46,6 +47,8 @@ export class KnowledgeBase {
   private readonly git: SimpleGit | null;
   private mutationQueue: Promise<unknown> = Promise.resolve();
   private initPromise: Promise<void> | null = null;
+  /** Lazily-opened FTS search index; `null` result means naive-scan fallback. */
+  private indexPromise: Promise<SearchIndex | null> | null = null;
 
   constructor(bundleRoot: string, private readonly options: KnowledgeBaseOptions = {}) {
     this.bundle = new Bundle(bundleRoot);
@@ -62,8 +65,42 @@ export class KnowledgeBase {
     return this.bundle.listTree();
   }
 
-  search(query: string, options?: SearchOptions): Promise<SearchHit[]> {
+  async search(query: string, options?: SearchOptions): Promise<SearchHit[]> {
+    const idx = await this.ensureIndex();
+    if (idx) {
+      try {
+        return await idx.search(query, options ?? {});
+      } catch (err) {
+        // Index query failed at runtime — fall back to the naive scan.
+        console.error(
+          `[understory] search index query failed, using naive scan: ${(err as Error).message}`
+        );
+      }
+    }
     return searchBundle(this.bundle, query, options);
+  }
+
+  /**
+   * Lazily open the FTS search index on first search/mutation. Logs one line
+   * recording which search path is in effect. Never throws: any failure yields
+   * `null` and the caller falls back to the naive scan (`searchBundle`).
+   */
+  private ensureIndex(): Promise<SearchIndex | null> {
+    if (!this.indexPromise) {
+      this.indexPromise = SearchIndex.open(this.bundle)
+        .then((idx) => {
+          if (idx) console.error("[understory] search index: fts");
+          else console.error("[understory] search index: naive-fallback (index unavailable)");
+          return idx;
+        })
+        .catch((err) => {
+          console.error(
+            `[understory] search index: naive-fallback (${(err as Error).message})`
+          );
+          return null;
+        });
+    }
+    return this.indexPromise;
   }
 
   listTypes(): Promise<string[]> {
@@ -92,6 +129,14 @@ export class KnowledgeBase {
   /** Inter-concept link graph (nodes + edges) for visualization. */
   graph(): Promise<GraphData> {
     return buildGraph(this.bundle);
+  }
+
+  /** Release the search index (closes its db handle). No-op when never opened. */
+  async close(): Promise<void> {
+    if (!this.indexPromise) return;
+    const idx = await this.indexPromise.catch(() => null);
+    this.indexPromise = null;
+    idx?.close();
   }
 
   // ── Mutations (serialized; auto event + log + index + optional commit) ──
@@ -188,6 +233,13 @@ export class KnowledgeBase {
     await appendEvent(this.bundle, event);
     await projectLog(this.bundle, await readEvents(this.bundle, { limit: Number.MAX_SAFE_INTEGER }));
     await regenerateIndexChain(this.bundle, path.posix.dirname(conceptPath));
+    try {
+      const idx = await this.ensureIndex();
+      if (idx) await idx.afterMutation();
+    } catch (err) {
+      // Index sync is best-effort; the KB write itself already succeeded.
+      console.error(`[understory] search index sync failed: ${(err as Error).message}`);
+    }
     if (this.git) {
       try {
         await this.git.add(".");
