@@ -2,6 +2,7 @@ export * from "./types.js";
 export { parseDoc, serializeDoc, hasNonEmptyType } from "./frontmatter.js";
 export { Bundle, BundleError, replaceSection } from "./bundle.js";
 export { regenerateIndex, regenerateIndexChain } from "./indexer.js";
+export type { DirSummary, IndexCache } from "./indexer.js";
 export { appendLog, readLog, projectLog, parseLegacyLog } from "./logger.js";
 export { appendEvent, readEvents, backfillEventsFromLog } from "./events.js";
 export type { KnowledgeEvent, EventFilter } from "./events.js";

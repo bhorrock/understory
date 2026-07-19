@@ -9,7 +9,7 @@ import {
   type EventFilter,
   type KnowledgeEvent,
 } from "./events.js";
-import { regenerateIndexChain } from "./indexer.js";
+import { regenerateIndexChain, type IndexCache } from "./indexer.js";
 import { projectLog, readLog } from "./logger.js";
 import { searchBundle, listTypes, type SearchOptions } from "./search.js";
 import { validateBundle } from "./validate.js";
@@ -50,6 +50,17 @@ export class KnowledgeBase {
   /** Lazily-opened FTS search index; `null` result means naive-scan fallback. */
   private indexPromise: Promise<SearchIndex | null> | null = null;
 
+  // ── Memoized whole-bundle scans (2c) ─────────────────────────────────
+  // Bumped once per mutation; a cache entry is valid only at the current
+  // generation AND within the TTL. The TTL guards against out-of-band edits
+  // (someone editing the markdown directly) that don't bump the generation.
+  private generation = 0;
+  private readonly readCache = new Map<string, { gen: number; expires: number; value: Promise<unknown> }>();
+  private static readonly READ_CACHE_TTL_MS = 30_000;
+
+  // Per-directory index summaries, invalidated along the touched chain (2d).
+  private readonly indexCache: IndexCache = new Map();
+
   constructor(bundleRoot: string, private readonly options: KnowledgeBaseOptions = {}) {
     this.bundle = new Bundle(bundleRoot);
     this.git = options.gitAutocommit ? simpleGit(this.bundle.root) : null;
@@ -62,7 +73,7 @@ export class KnowledgeBase {
   }
 
   listTree(): Promise<TreeNode> {
-    return this.bundle.listTree();
+    return this.cachedScan("listTree", () => this.bundle.listTree());
   }
 
   async search(query: string, options?: SearchOptions): Promise<SearchHit[]> {
@@ -104,7 +115,7 @@ export class KnowledgeBase {
   }
 
   listTypes(): Promise<string[]> {
-    return listTypes(this.bundle);
+    return this.cachedScan("listTypes", () => listTypes(this.bundle));
   }
 
   readLog(): Promise<LogEntry[]> {
@@ -128,7 +139,27 @@ export class KnowledgeBase {
 
   /** Inter-concept link graph (nodes + edges) for visualization. */
   graph(): Promise<GraphData> {
-    return buildGraph(this.bundle);
+    return this.cachedScan("graph", () => buildGraph(this.bundle));
+  }
+
+  /**
+   * Memoize a whole-bundle scan: a hit requires the same generation (no mutation
+   * since) AND a live TTL (bounds staleness from out-of-band edits). Rejections
+   * are never cached, so a transient failure doesn't stick.
+   */
+  private cachedScan<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const now = Date.now();
+    const hit = this.readCache.get(key);
+    if (hit && hit.gen === this.generation && hit.expires > now) {
+      return hit.value as Promise<T>;
+    }
+    const value = fn();
+    const entry = { gen: this.generation, expires: now + KnowledgeBase.READ_CACHE_TTL_MS, value };
+    this.readCache.set(key, entry);
+    value.catch(() => {
+      if (this.readCache.get(key) === entry) this.readCache.delete(key);
+    });
+    return value;
   }
 
   /** Release the search index (closes its db handle). No-op when never opened. */
@@ -213,6 +244,21 @@ export class KnowledgeBase {
     await fs.writeFile(gitignorePath, existing + prefix + missing.join("\n") + "\n", "utf-8");
   }
 
+  /**
+   * Drop cached summaries for the changed directory and every ancestor to the
+   * root — exactly the directories whose recursive summary the change affects.
+   * Unchanged sibling directories keep their cached summaries.
+   */
+  private invalidateIndexChain(dir: string): void {
+    let current = this.bundle.resolve(dir);
+    if (current.endsWith(".md")) current = path.dirname(current);
+    while (true) {
+      this.indexCache.delete(current);
+      if (current === this.bundle.root) break;
+      current = path.dirname(current);
+    }
+  }
+
   private async afterMutation(
     conceptPath: string,
     action: LogAction,
@@ -220,6 +266,8 @@ export class KnowledgeBase {
     meta?: MutationMeta
   ): Promise<void> {
     await this.ensureInitialized();
+    // Invalidate memoized scans — the next read re-walks the bundle.
+    this.generation++;
     const linked = `[${conceptPath.split("/").pop()}](${conceptPath})`;
     const summary = logSummary || `${action} of ${linked}.`;
     const event: KnowledgeEvent = {
@@ -232,7 +280,9 @@ export class KnowledgeBase {
     if (meta?.modelChain && meta.modelChain.length > 0) event.modelChain = meta.modelChain;
     await appendEvent(this.bundle, event);
     await projectLog(this.bundle, await readEvents(this.bundle, { limit: Number.MAX_SAFE_INTEGER }));
-    await regenerateIndexChain(this.bundle, path.posix.dirname(conceptPath));
+    const changedDir = path.posix.dirname(conceptPath);
+    this.invalidateIndexChain(changedDir);
+    await regenerateIndexChain(this.bundle, changedDir, this.indexCache);
     try {
       const idx = await this.ensureIndex();
       if (idx) await idx.afterMutation();
